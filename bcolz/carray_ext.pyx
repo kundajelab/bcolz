@@ -717,7 +717,7 @@ cdef class chunks(object):
         def __get__(self):
             return os.path.join(self.rootdir, DATA_DIR)
 
-    def __cinit__(self, rootdir, metainfo=None, _new=False):
+    def __cinit__(self, rootdir, metainfo=None, _new=False, _cacheall=False):
         cdef ndarray lastchunkarr
         cdef void *decompressed
         cdef void *compressed
@@ -734,6 +734,7 @@ cdef class chunks(object):
         self.dtype, self.cparams, self.len, lastchunkarr, self._mode = metainfo
         atomsize = self.dtype.itemsize
         itemsize = self.dtype.base.itemsize
+        self._cache = None
 
         # For 'O'bject types, the number of chunks is equal to the number of
         # elements
@@ -755,6 +756,9 @@ cdef class chunks(object):
                     raise RuntimeError(
                         "error decompressing the last chunk (error code: "
                         "%d)" % ret)
+
+            if _cacheall:
+                self._cache = [None] * self.nchunks
 
     cdef _chunk_file_name(self, nchunk):
         """ Determine the name of a chunk file. """
@@ -794,6 +798,10 @@ cdef class chunks(object):
         cdef void *decompressed
         cdef void *compressed
 
+        if self._cache:
+            if self._cache[nchunk] is not None:
+                return self._cache[nchunk]
+
         if nchunk == self.nchunk_cached:
             # Hit!
             return self.chunk_cached
@@ -805,6 +813,11 @@ cdef class chunks(object):
             # Fill cache
             self.nchunk_cached = nchunk
             self.chunk_cached = chunk_
+
+            if self._cache:
+                assert self._cache[nchunk] is None
+                self._cache[nchunk] = chunk_
+
         return chunk_
 
     def __setitem__(self, nchunk, chunk_):
@@ -1054,8 +1067,14 @@ cdef class carray:
                   object rootdir=None, object safe=True, object mode="a"):
 
         self._rootdir = rootdir
-        if mode not in ('r', 'w', 'a'):
-            raise ValueError("mode should be 'r', 'w' or 'a'")
+        if mode not in ('r', 'w', 'a', 'R'):
+            raise ValueError("mode should be 'r', 'R', 'w' or 'a'")
+
+        self._cacheall = False
+        if mode == 'R':
+            mode = 'r'
+            self._cacheall = True
+
         self._mode = mode
         self._safe = safe
 
@@ -1270,7 +1289,8 @@ cdef class carray:
 
             # Finally, open data directory
             metainfo = (dtype, cparams, shape[0], lastchunkarr, self._mode)
-            self.chunks = chunks(self._rootdir, metainfo=metainfo, _new=False)
+            self.chunks = chunks(self._rootdir, metainfo=metainfo, _new=False,
+                                 _cacheall=self._cacheall)
         else:
             self.chunks, lastchunkarr[:] = xchunks
 

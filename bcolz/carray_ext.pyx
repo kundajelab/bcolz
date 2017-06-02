@@ -735,6 +735,7 @@ cdef class chunks(object):
         atomsize = self.dtype.itemsize
         itemsize = self.dtype.base.itemsize
         self._cache = None
+        self._cachelock = threading.Lock()
 
         # For 'O'bject types, the number of chunks is equal to the number of
         # elements
@@ -799,8 +800,9 @@ cdef class chunks(object):
         cdef void *compressed
 
         if self._cache:
-            if self._cache[nchunk] is not None:
-                return self._cache[nchunk]
+            with self._cachelock:
+                if self._cache[nchunk] is not None:
+                    return self._cache[nchunk]
 
         if nchunk == self.nchunk_cached:
             # Hit!
@@ -815,8 +817,9 @@ cdef class chunks(object):
             self.chunk_cached = chunk_
 
             if self._cache:
-                assert self._cache[nchunk] is None
-                self._cache[nchunk] = chunk_
+                with self._cachelock:
+                    assert self._cache[nchunk] is None
+                    self._cache[nchunk] = chunk_
 
         return chunk_
 
